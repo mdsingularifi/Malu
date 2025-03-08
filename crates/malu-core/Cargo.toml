@@ -1,0 +1,24 @@
+[package]
+name = "malu_core"
+version = "0.1.0"
+edition = "2021"
+description = "Core component for the Malu storage system"
+authors = ["Malu Team"]
+license = "PROPRIETARY"
+
+[dependencies]
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+
+# Common interfaces
+malu_interfaces = { path = "../malu-interfaces" }
+
+[features]
+default = []
+with_events = []
