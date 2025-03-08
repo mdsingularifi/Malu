@@ -30,6 +30,7 @@ struct OpaResponse {
 /// OPA status response format
 #[derive(Debug, Deserialize)]
 struct OpaStatus {
+    #[allow(dead_code)]
     status: String,
 }
 
@@ -350,7 +351,9 @@ impl GovernanceProvider for OpaGovernanceProvider {
                 as Box<dyn std::error::Error + Send + Sync>
         })?;
         
-        let policies = result["result"]["policies"].as_array().unwrap_or(&Vec::new());
+        // Create empty vec outside to ensure it lives long enough if needed
+        let empty_vec = Vec::new();
+        let policies = result["result"]["policies"].as_array().unwrap_or(&empty_vec);
         
         let policy_list = policies.iter()
             .filter_map(|v| v.as_str().map(|s| s.to_string()))

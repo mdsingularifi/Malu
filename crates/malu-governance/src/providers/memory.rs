@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use malu_interfaces::{GovernanceProvider, PrincipalType, Result};
-use crate::error::{GovernanceError, Result as GovResult};
+use crate::error::GovernanceError;
 use crate::policy::Policy;
 
 /// In-memory implementation of the GovernanceProvider interface

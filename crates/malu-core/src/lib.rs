@@ -49,11 +49,8 @@ impl MaluStore {
         // Derive a key from the path and config
         let key = self.derive_encryption_key(path).await?;
         
-        // Use path as context for authentication
-        let context = path;
-        
-        // Encrypt the secret with context and key
-        let encrypted = self.crypto_provider.encrypt(context, secret, &key).await?;
+        // Encrypt the secret
+        let encrypted = self.crypto_provider.encrypt(path, secret, &key).await?;
         
         // Store the encrypted data
         self.storage_engine.store(path, &encrypted).await?;
@@ -69,11 +66,8 @@ impl MaluStore {
         // Derive the same key used for encryption
         let key = self.derive_encryption_key(path).await?;
         
-        // Use path as context for authentication
-        let context = path;
-        
-        // Decrypt the data with context and key
-        let decrypted = self.crypto_provider.decrypt(context, &encrypted, &key).await?;
+        // Decrypt the data
+        let decrypted = self.crypto_provider.decrypt(path, &encrypted, &key).await?;
         
         Ok(decrypted)
     }
@@ -87,7 +81,8 @@ impl MaluStore {
         let passphrase = path.as_bytes();
         
         // Derive a unique key for this path
-        self.crypto_provider.derive_key(passphrase, &salt, None as Option<&[u8]>).await
+        let key = self.crypto_provider.derive_key(passphrase, &salt, None).await?;
+        Ok(key)
     }
     
     /// Get the system salt for key derivation
@@ -98,7 +93,8 @@ impl MaluStore {
         let salt_input = format!("malu-system-salt:{}", storage_path);
         
         // Hash the input to get a suitable salt
-        self.crypto_provider.hash(salt_input.as_bytes()).await
+        let salt = self.crypto_provider.hash(salt_input.as_bytes()).await?;
+        Ok(salt)
     }
     
     /// Authenticate a user

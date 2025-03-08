@@ -16,6 +16,7 @@ use crate::policy::Policy;
 /// This provider stores policies and assignments as JSON files in the specified directory.
 #[derive(Debug)]
 pub struct FileGovernanceProvider {
+    #[allow(dead_code)]
     base_path: PathBuf,
     policies_path: PathBuf,
     assignments_path: PathBuf,
