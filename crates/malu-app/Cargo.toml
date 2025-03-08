@@ -7,12 +7,16 @@ authors = ["Malu Team"]
 license = "PROPRIETARY"
 
 [dependencies]
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 
-# Common interfaces
+# Malu system components
 malu_interfaces = { path = "../malu-interfaces" }
 malu_core = { path = "../malu-core" }
+malu_api = { path = "../malu-api" }
+
+[dev-dependencies]
+tempfile = "3.3"
