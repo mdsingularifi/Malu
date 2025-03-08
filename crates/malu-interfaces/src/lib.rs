@@ -79,3 +79,44 @@ pub trait VersionedEntity {
     /// Migrate to the latest version
     fn migrate_to_latest(self) -> Self;
 }
+
+/// Governance provider interface for policy management and access control
+#[async_trait]
+pub trait GovernanceProvider: Send + Sync + Debug {
+    /// Check if a user has permission to perform an action on a resource
+    async fn check_permission(&self, user_id: &str, action: &str, resource: &str) -> Result<bool>;
+    
+    /// Create or update a policy
+    async fn set_policy(&self, policy_id: &str, policy_definition: &str) -> Result<()>;
+    
+    /// Get a policy by ID
+    async fn get_policy(&self, policy_id: &str) -> Result<String>;
+    
+    /// Delete a policy by ID
+    async fn delete_policy(&self, policy_id: &str) -> Result<()>;
+    
+    /// List policies with optional prefix
+    async fn list_policies(&self, prefix: Option<&str>) -> Result<Vec<String>>;
+    
+    /// Assign a policy to a user or group
+    async fn assign_policy(&self, policy_id: &str, principal_id: &str, principal_type: PrincipalType) -> Result<()>;
+    
+    /// Revoke a policy from a user or group
+    async fn revoke_policy(&self, policy_id: &str, principal_id: &str, principal_type: PrincipalType) -> Result<()>;
+    
+    /// List policies assigned to a principal
+    async fn list_principal_policies(&self, principal_id: &str, principal_type: PrincipalType) -> Result<Vec<String>>;
+}
+
+/// Type of principal for governance operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PrincipalType {
+    /// Individual user
+    User,
+    
+    /// Group of users
+    Group,
+    
+    /// Role that can be assigned to users or groups
+    Role,
+}

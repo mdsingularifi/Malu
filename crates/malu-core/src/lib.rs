@@ -87,7 +87,7 @@ impl MaluStore {
         let passphrase = path.as_bytes();
         
         // Derive a unique key for this path
-        self.crypto_provider.derive_key(passphrase, &salt, None).await
+        self.crypto_provider.derive_key(passphrase, &salt, None as Option<&[u8]>).await
     }
     
     /// Get the system salt for key derivation
@@ -158,10 +158,10 @@ impl MaluStoreBuilder {
     
     /// Build the MaluStore
     pub fn build(self) -> Result<MaluStore> {
-        let config = self.config.ok_or("Configuration is required")?;
-        let storage_engine = self.storage_engine.ok_or("Storage engine is required")?;
-        let crypto_provider = self.crypto_provider.ok_or("Crypto provider is required")?;
-        let auth_provider = self.auth_provider.ok_or("Auth provider is required")?;
+        let config = self.config.ok_or(MaluError::Configuration("Configuration is required".to_string()))?;
+        let storage_engine = self.storage_engine.ok_or(MaluError::Configuration("Storage engine is required".to_string()))?;
+        let crypto_provider = self.crypto_provider.ok_or(MaluError::Configuration("Crypto provider is required".to_string()))?;
+        let auth_provider = self.auth_provider.ok_or(MaluError::Configuration("Auth provider is required".to_string()))?;
         
         Ok(MaluStore::new(
             config,
