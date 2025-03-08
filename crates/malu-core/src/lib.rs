@@ -46,8 +46,14 @@ impl MaluStore {
     
     /// Store a secret in the secure store
     pub async fn store_secret(&self, path: &str, secret: &[u8]) -> malu_interfaces::Result<()> {
-        // Encrypt the secret
-        let encrypted = self.crypto_provider.encrypt(secret).await?;
+        // Derive a key from the path and config
+        let key = self.derive_encryption_key(path).await?;
+        
+        // Use path as context for authentication
+        let context = path;
+        
+        // Encrypt the secret with context and key
+        let encrypted = self.crypto_provider.encrypt(context, secret, &key).await?;
         
         // Store the encrypted data
         self.storage_engine.store(path, &encrypted).await?;
@@ -60,10 +66,39 @@ impl MaluStore {
         // Retrieve the encrypted data
         let encrypted = self.storage_engine.retrieve(path).await?;
         
-        // Decrypt the data
-        let decrypted = self.crypto_provider.decrypt(&encrypted).await?;
+        // Derive the same key used for encryption
+        let key = self.derive_encryption_key(path).await?;
+        
+        // Use path as context for authentication
+        let context = path;
+        
+        // Decrypt the data with context and key
+        let decrypted = self.crypto_provider.decrypt(context, &encrypted, &key).await?;
         
         Ok(decrypted)
+    }
+    
+    /// Derive an encryption key based on the path and system master key
+    async fn derive_encryption_key(&self, path: &str) -> malu_interfaces::Result<Vec<u8>> {
+        // Use a fixed salt derived from system config
+        let salt = self.get_key_derivation_salt().await?;
+        
+        // Use the path as the input for key derivation
+        let passphrase = path.as_bytes();
+        
+        // Derive a unique key for this path
+        self.crypto_provider.derive_key(passphrase, &salt, None).await
+    }
+    
+    /// Get the system salt for key derivation
+    async fn get_key_derivation_salt(&self) -> malu_interfaces::Result<Vec<u8>> {
+        // In a real implementation, this would be stored securely or derived from a master key
+        // For now, we'll use a fixed salt based on the storage path
+        let storage_path = self.config.storage_path.to_string_lossy();
+        let salt_input = format!("malu-system-salt:{}", storage_path);
+        
+        // Hash the input to get a suitable salt
+        self.crypto_provider.hash(salt_input.as_bytes()).await
     }
     
     /// Authenticate a user

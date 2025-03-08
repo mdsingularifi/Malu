@@ -1,5 +1,6 @@
 //! Common interfaces for the Malu secure storage system
 
+// Import async-trait with specific version to avoid build issues
 use async_trait::async_trait;
 use std::error::Error;
 use std::fmt::Debug;
@@ -29,17 +30,29 @@ pub trait StorageEngine: Send + Sync + Debug {
 /// Cryptographic provider interface
 #[async_trait]
 pub trait CryptoProvider: Send + Sync + Debug {
-    /// Encrypt data
-    async fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>>;
+    /// Generate a cryptographically secure nonce
+    async fn generate_nonce(&self, length: usize) -> Result<Vec<u8>>;
+
+    /// Encrypt data with authentication context and key
+    async fn encrypt(&self, context: &str, plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>>;
     
-    /// Decrypt data
-    async fn decrypt(&self, ciphertext: &[u8]) -> Result<Vec<u8>>;
+    /// Decrypt data with authentication context and key
+    async fn decrypt(&self, context: &str, ciphertext: &[u8], key: &[u8]) -> Result<Vec<u8>>;
     
-    /// Generate a secure random nonce
-    fn generate_nonce(&self, size: usize) -> Result<Vec<u8>>;
+    /// Derive a key from the given inputs
+    async fn derive_key(&self, passphrase: &[u8], salt: &[u8], info: Option<&[u8]>) -> Result<Vec<u8>>;
     
-    /// Derive a key from a password
-    fn derive_key(&self, password: &str, salt: &[u8], iterations: u32) -> Result<Vec<u8>>;
+    /// Generate cryptographically secure random bytes
+    async fn generate_random(&self, length: usize) -> Result<Vec<u8>>;
+    
+    /// Hash data using the default hash algorithm
+    async fn hash(&self, data: &[u8]) -> Result<Vec<u8>>;
+    
+    /// Sign a message using the given key
+    async fn sign(&self, message: &[u8], key: &[u8]) -> Result<Vec<u8>>;
+    
+    /// Verify a signature using the given key
+    async fn verify(&self, message: &[u8], signature: &[u8], key: &[u8]) -> Result<bool>;
 }
 
 /// Authentication provider interface
