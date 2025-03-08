@@ -88,7 +88,7 @@ impl AuthProvider for LocalAuthProvider {
 /// OIDC auth provider that authenticates against an OIDC provider
 #[derive(Debug, Clone)]
 pub struct OidcAuthProvider {
-    config: OidcConfig,
+    _config: OidcConfig,
     mfa_required: bool,
 }
 
@@ -96,7 +96,7 @@ impl OidcAuthProvider {
     /// Create a new OIDC auth provider
     pub fn new(config: OidcConfig, mfa_required: bool) -> Self {
         Self {
-            config,
+            _config: config,
             mfa_required,
         }
     }

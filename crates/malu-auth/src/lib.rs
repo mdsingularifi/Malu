@@ -26,7 +26,6 @@ pub fn create_auth_provider(config: &MaluConfig) -> Arc<dyn AuthProvider> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use malu_core::{AuthConfig, AuthProviderType};
     
     #[tokio::test]
     async fn test_local_auth() {
