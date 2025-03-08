@@ -243,6 +243,12 @@ pub struct KeyManager {
     keys: Arc<RwLock<HashMap<KeyId, Key>>>,
 }
 
+impl Default for KeyManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KeyManager {
     /// Create a new key manager without a master key
     pub fn new() -> Self {

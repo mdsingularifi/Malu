@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use ring::signature::KeyPair;
 
 /// Signature algorithms supported by the system
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SignatureAlgorithm {
     /// ECDSA with the P-256 curve
     EcdsaP256,
@@ -19,6 +19,7 @@ pub enum SignatureAlgorithm {
     EcdsaP384,
     
     /// Ed25519 (Edwards-curve Digital Signature Algorithm)
+    #[default]
     Ed25519,
     
     /// RSA with PKCS#1 v1.5 padding and SHA-256
@@ -26,12 +27,6 @@ pub enum SignatureAlgorithm {
     
     /// RSA with PSS padding and SHA-256
     RsaPss,
-}
-
-impl Default for SignatureAlgorithm {
-    fn default() -> Self {
-        SignatureAlgorithm::Ed25519
-    }
 }
 
 /// Key pair for digital signatures
@@ -136,7 +131,7 @@ pub fn generate_key_pair(algorithm: SignatureAlgorithm) -> Result<SignatureKeyPa
         },
         SignatureAlgorithm::RsaPkcs1v15 | SignatureAlgorithm::RsaPss => {
             // Ring doesn't support RSA key generation, so we use openssl crate
-            return Err(CryptoError::Algorithm("RSA key generation not supported in this implementation".into()));
+            Err(CryptoError::Algorithm("RSA key generation not supported in this implementation".into()))
         }
     }
 }
@@ -187,7 +182,7 @@ pub fn sign(message: &[u8], private_key: &[u8], algorithm: SignatureAlgorithm) -
                 .map_err(|_| CryptoError::Internal("Signing failed".into()))
         },
         SignatureAlgorithm::RsaPkcs1v15 | SignatureAlgorithm::RsaPss => {
-            return Err(CryptoError::Algorithm("RSA signing not supported in this implementation".into()));
+            Err(CryptoError::Algorithm("RSA signing not supported in this implementation".into()))
         }
     }
 }

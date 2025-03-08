@@ -7,9 +7,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256, Sha512};
 
 /// Hash algorithms supported by the system
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum HashAlgorithm {
     /// SHA-256 (256-bit hash)
+    #[default]
     Sha256,
     
     /// SHA-512 (512-bit hash)
@@ -17,12 +18,6 @@ pub enum HashAlgorithm {
     
     /// BLAKE3 (configurable output length)
     Blake3,
-}
-
-impl Default for HashAlgorithm {
-    fn default() -> Self {
-        HashAlgorithm::Sha256
-    }
 }
 
 /// Hash data using the specified algorithm

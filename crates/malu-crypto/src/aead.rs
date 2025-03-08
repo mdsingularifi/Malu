@@ -12,19 +12,14 @@ use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 /// Encryption algorithms supported by the system
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum EncryptionAlgorithm {
     /// AES-256 in Galois/Counter Mode (GCM) with 96-bit nonce
+    #[default]
     Aes256Gcm,
     
     /// XChaCha20-Poly1305 with 192-bit nonce
     XChaCha20Poly1305,
-}
-
-impl Default for EncryptionAlgorithm {
-    fn default() -> Self {
-        EncryptionAlgorithm::Aes256Gcm
-    }
 }
 
 /// Generate a secure random nonce of the specified length

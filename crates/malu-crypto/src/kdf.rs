@@ -13,9 +13,10 @@ use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 /// Key derivation algorithms supported by the system
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum KdfAlgorithm {
     /// Argon2id (memory-hard function recommended for password hashing)
+    #[default]
     Argon2id,
     
     /// PBKDF2 with HMAC-SHA256
@@ -23,12 +24,6 @@ pub enum KdfAlgorithm {
     
     /// HKDF with HMAC-SHA256 (for deriving multiple keys from a single master key)
     Hkdf,
-}
-
-impl Default for KdfAlgorithm {
-    fn default() -> Self {
-        KdfAlgorithm::Argon2id
-    }
 }
 
 /// Parameters for key derivation
