@@ -7,17 +7,12 @@ use std::fs;
 use std::io;
 
 /// Configuration version for migration support
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ConfigVersion {
     V1,
+    #[default]
     V2,
     // Future versions will be added here
-}
-
-impl Default for ConfigVersion {
-    fn default() -> Self {
-        ConfigVersion::V2 // Current version
-    }
 }
 
 /// Configuration for the Malu system
@@ -108,6 +103,12 @@ pub enum CryptoProviderType {
     
     /// HSM-based cryptography
     Hsm,
+}
+
+impl Default for MaluConfig {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MaluConfig {
@@ -224,6 +225,12 @@ pub struct V1CryptoConfig {
 /// Configuration builder for more flexible construction
 pub struct MaluConfigBuilder {
     config: MaluConfig,
+}
+
+impl Default for MaluConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MaluConfigBuilder {

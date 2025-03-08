@@ -48,3 +48,10 @@ pub enum MaluError {
 
 /// Result type for Malu operations
 pub type Result<T> = std::result::Result<T, MaluError>;
+
+/// Implement From<&str> for MaluError to allow using the ? operator with string literals
+impl From<&str> for MaluError {
+    fn from(message: &str) -> Self {
+        MaluError::Configuration(message.to_string())
+    }
+}

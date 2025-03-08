@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 /// Main entry point for the Malu system
 pub struct MaluStore {
+    #[allow(dead_code)]
     config: Arc<MaluConfig>,
     storage_engine: Box<dyn StorageEngine>,
     crypto_provider: Box<dyn CryptoProvider>,
@@ -79,6 +80,12 @@ pub struct MaluStoreBuilder {
     auth_provider: Option<Box<dyn AuthProvider>>,
 }
 
+impl Default for MaluStoreBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MaluStoreBuilder {
     /// Create a new builder
     pub fn new() -> Self {
@@ -115,7 +122,7 @@ impl MaluStoreBuilder {
     }
     
     /// Build the MaluStore
-    pub fn build(self) -> Result<MaluStore, &'static str> {
+    pub fn build(self) -> Result<MaluStore> {
         let config = self.config.ok_or("Configuration is required")?;
         let storage_engine = self.storage_engine.ok_or("Storage engine is required")?;
         let crypto_provider = self.crypto_provider.ok_or("Crypto provider is required")?;
