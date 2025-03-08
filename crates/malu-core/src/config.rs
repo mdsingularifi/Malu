@@ -93,6 +93,10 @@ pub struct CryptoConfig {
     
     /// Key derivation iterations
     pub kdf_iterations: u32,
+    
+    /// HSM-specific configuration (when provider_type is Hsm)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hsm_config: Option<serde_json::Value>,
 }
 
 /// Cryptographic provider types
@@ -125,6 +129,7 @@ impl MaluConfig {
             crypto: CryptoConfig {
                 provider_type: CryptoProviderType::Software,
                 kdf_iterations: 100000,
+                hsm_config: None,
             },
             extensions: Vec::new(),
         }

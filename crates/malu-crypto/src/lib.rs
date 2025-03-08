@@ -2,21 +2,20 @@
 //!
 //! This crate provides cryptographic functionality for the Malu secure storage system,
 //! including encryption, key management, digital signatures, and secure key derivation.
-//! It supports both software-based cryptography and hardware security modules (HSMs).
+//! For hardware security module (HSM) support, see the `malu_hsm` crate.
 
 mod aead;
 mod error;
 mod hash;
 mod kdf;
 mod key_management;
-mod provider;
+pub mod provider;
 mod signature;
-
-#[cfg(feature = "hsm")]
-mod hsm;
 
 pub use error::{CryptoError, Result};
 pub use provider::{CryptoProviderType, CryptoProviderFactory, SoftwareCryptoProvider};
+#[cfg(feature = "hsm")]
+pub use provider::register_hsm_provider_factory;
 pub use malu_interfaces::CryptoProvider;
 pub use key_management::{KeyManager, MasterKey, KeyId, SecretKey};
 // Re-export core types but not the functions to avoid conflicts with trait methods
@@ -42,9 +41,7 @@ pub fn init() {
     // We're now using standard Rust crypto libraries instead
     tracing::info!("Initializing crypto subsystem");
 
-    // Any other global initialization required
-    #[cfg(feature = "hsm")]
-    hsm::init();
+    // If HSM functionality is needed, initialize malu_hsm separately
 }
 
 #[cfg(test)]

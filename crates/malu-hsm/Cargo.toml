@@ -2,17 +2,31 @@
 name = "malu_hsm"
 version = "0.1.0"
 edition = "2021"
-description = "Hsm component for the Malu system"
+description = "HSM component for the Malu system"
 authors = ["Malu Team"]
 license = "PROPRIETARY"
 
 [dependencies]
 tokio = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
+tracing = { workspace = true }
+zeroize = { version = "1.6", features = ["derive"] }
+rand = "0.8"
+base64 = "0.21"
+
+# HSM support libraries
+pkcs11 = { version = "0.5", optional = true }
+yubikey = { version = "0.8", optional = true }
 
 # Common interfaces
 malu_interfaces = { path = "../malu-interfaces" }
 malu_core = { path = "../malu-core" }
+
+[features]
+default = []
+pkcs11 = ["dep:pkcs11"]
+yubikey = ["dep:yubikey"]
+tpm = []

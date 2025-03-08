@@ -25,18 +25,35 @@ pub enum CryptoProviderType {
 /// Factory for creating CryptoProvider instances
 pub struct CryptoProviderFactory;
 
+/// Interface for crypto provider creation
+/// 
+/// This trait allows for modular creation of crypto providers without
+/// direct dependencies between crates.
+pub trait CryptoProviderCreator: Send + Sync + 'static {
+    /// Create a new crypto provider using the given config
+    fn create_provider(&self, config: &MaluConfig) -> Arc<dyn CryptoProvider>;
+}
+
 impl CryptoProviderFactory {
-    /// Create a new CryptoProvider based on the specified type
+    /// Create a software crypto provider
+    pub fn create_software_provider(config: &MaluConfig) -> Arc<dyn CryptoProvider> {
+        let kdf_iterations = config.crypto.kdf_iterations;
+        Arc::new(SoftwareCryptoProvider::new_with_iterations(kdf_iterations))
+    }
+    
+    /// Create a crypto provider based on the specified type
     pub fn create(provider_type: CryptoProviderType, config: &MaluConfig) -> Arc<dyn CryptoProvider> {
         match provider_type {
             CryptoProviderType::Software => {
-                let kdf_iterations = config.crypto.kdf_iterations;
-                Arc::new(SoftwareCryptoProvider::new_with_iterations(kdf_iterations))
+                Self::create_software_provider(config)
             },
             #[cfg(feature = "hsm")]
             CryptoProviderType::Hsm => {
-                let hsm_config = &config.crypto.hsm_config;
-                Arc::new(crate::hsm::HsmCryptoProvider::new(hsm_config))
+                // When implementing with an HSM, the application should provide
+                // the correct HSM provider through dependency injection
+                // For now, we fall back to software if HSM is requested but not available
+                debug!("HSM provider requested but not available, falling back to software provider");
+                Self::create_software_provider(config)
             }
         }
     }

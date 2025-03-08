@@ -85,9 +85,4 @@ impl From<serde_json::Error> for CryptoError {
     }
 }
 
-#[cfg(feature = "hsm")]
-impl From<pkcs11::Error> for CryptoError {
-    fn from(err: pkcs11::Error) -> Self {
-        CryptoError::Hsm(format!("PKCS#11 error: {:?}", err))
-    }
-}
+// PKCS#11 error handling moved to malu-hsm crate
