@@ -107,7 +107,7 @@ impl HsmCryptoProvider {
                 
                 #[cfg(not(feature = "pkcs11"))]
                 {
-                    return Err(HsmError::Hsm("PKCS#11 support not enabled".into()));
+                    Err(HsmError::Hsm("PKCS#11 support not enabled".into()))
                 }
             },
             HsmType::YubiKey => {
@@ -120,12 +120,12 @@ impl HsmCryptoProvider {
                 
                 #[cfg(not(feature = "yubikey"))]
                 {
-                    return Err(HsmError::Hsm("YubiKey support not enabled".into()));
+                    Err(HsmError::Hsm("YubiKey support not enabled".into()))
                 }
             },
             HsmType::Tpm => {
                 debug!("TPM support not yet implemented");
-                return Err(HsmError::Hsm("TPM support not yet implemented".into()));
+                Err(HsmError::Hsm("TPM support not yet implemented".into()))
             }
         }
     }

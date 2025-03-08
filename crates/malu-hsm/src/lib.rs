@@ -45,6 +45,12 @@ pub fn init() {
 #[derive(Debug, Clone)]
 pub struct HsmCryptoProviderFactory;
 
+impl Default for HsmCryptoProviderFactory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HsmCryptoProviderFactory {
     /// Create a new factory
     pub fn new() -> Self {
