@@ -1804,6 +1804,7 @@ dependencies = [
  "futures",
  "leveldb",
  "malu_core",
+ "malu_crypto",
  "malu_interfaces",
  "path-absolutize",
  "pgvector",

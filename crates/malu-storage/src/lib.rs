@@ -9,6 +9,7 @@
 //! - PostgresStorage: Store secrets in PostgreSQL database (optional)
 //! - ValkeyStorage: Store secrets in Valkey/Redis (optional)
 //! - LevelDBStorage: Store secrets in LevelDB (optional)
+//! - EncryptedStorage: Wrapper that encrypts data before storing in any storage engine
 //! - Repository: Higher-level API built on top of storage engines
 
 mod error;
@@ -26,6 +27,7 @@ mod valkey;
 mod leveldb;
 mod repository;
 mod utils;
+mod encrypted;
 
 pub use error::{StorageError, Result};
 #[cfg(feature = "fs-storage")]
@@ -41,6 +43,7 @@ pub use valkey::ValkeyStorage;
 #[cfg(feature = "leveldb-storage")]
 pub use leveldb::LevelDBStorage;
 pub use repository::Repository;
+pub use encrypted::{EncryptedStorage, create_encrypted_storage, create_default_crypto_provider};
 
 /// Creates a storage engine based on the provided configuration
 pub fn create_storage_engine(engine_type: &str, connection_string: &str) -> Box<dyn malu_interfaces::StorageEngine> {
@@ -61,8 +64,23 @@ pub fn create_storage_engine(engine_type: &str, connection_string: &str) -> Box<
     }
 }
 
+/// Creates an encrypted storage engine based on the provided configuration
+pub fn create_encrypted_storage_engine(engine_type: &str, connection_string: &str, salt: &[u8]) -> Box<dyn malu_interfaces::StorageEngine> {
+    // Create the underlying storage engine
+    let storage = create_storage_engine(engine_type, connection_string);
+    
+    // Create a default crypto provider
+    let crypto = create_default_crypto_provider();
+    
+    // Create an encrypted storage wrapper
+    create_encrypted_storage(storage, crypto, salt)
+}
+
 #[cfg(test)]
-mod tests {
+mod tests;
+
+#[cfg(test)]
+mod unit_tests {
     #[test]
     fn it_works() {
         assert_eq!(2 + 2, 4);

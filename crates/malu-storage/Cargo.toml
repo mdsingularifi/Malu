@@ -19,6 +19,7 @@ futures = { workspace = true }
 # Common interfaces
 malu_interfaces = { path = "../malu-interfaces" }
 malu_core = { path = "../malu-core" }
+malu_crypto = { path = "../malu-crypto" }
 
 # File system dependencies
 tokio-util = { version = "0.7", features = ["io"] }
