@@ -81,8 +81,9 @@ impl AuthProvider for SimpleAuthProvider {
             let mut hash = vec![0u8; HASH_SIZE];
             pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, PBKDF2_ITERATIONS, &mut hash);
             
-            // Compare the hashes in constant time
-            let matched = ring::constant_time::verify_slices_are_equal(&hash, stored_hash).is_ok();
+            // Compare the hashes in constant time using subtle
+            use subtle::ConstantTimeEq;
+            let matched = hash.ct_eq(stored_hash).into();
             
             Ok(matched)
         } else {

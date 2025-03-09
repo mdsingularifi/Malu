@@ -102,8 +102,6 @@ impl TokenAuthProvider {
     
     /// Verify a password against a stored hash
     fn verify_password(&self, password: &str, stored_hash: &str) -> Result<bool> {
-        use ring::constant_time::verify_slices_are_equal;
-        
         // Decode the stored hash from Base64
         let decoded = BASE64.decode(stored_hash).map_err(|e| {
             ServiceError::AuthError(format!("Failed to decode hash: {}", e))
@@ -120,8 +118,9 @@ impl TokenAuthProvider {
         let mut new_hash = vec![0u8; 32];
         pbkdf2::pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, 100_000, &mut new_hash);
         
-        // Compare the hashes in constant time
-        let matched = verify_slices_are_equal(hash, &new_hash).is_ok();
+        // Compare the hashes in constant time using subtle
+        use subtle::ConstantTimeEq;
+        let matched = hash.ct_eq(&new_hash).into();
         
         Ok(matched)
     }
