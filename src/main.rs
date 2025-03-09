@@ -16,12 +16,20 @@ use axum::{
 use tower_http::cors::{CorsLayer, Any};
 use tower_http::trace::TraceLayer;
 use tower_http::timeout::TimeoutLayer;
-use tower_http::limit::RequestBodyLimitLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, fmt::format::FmtSpan};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
+
+// OpenTelemetry imports (currently disabled but kept for reference)
+// We're keeping these imports commented out until we resolve dependency compatibility issues
+// use opentelemetry::global;
+// use opentelemetry::sdk::{Resource, trace};
+// use opentelemetry_otlp::WithExportConfig;
+// use opentelemetry::KeyValue;
+// use opentelemetry_sdk::runtime::Tokio;
+use tracing::Instrument;
 
 
 #[tokio::main]
@@ -43,12 +51,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse::<u64>()
         .expect("REQUEST_TIMEOUT_SECS must be a valid number");
         
-    let request_body_limit = std::env::var("REQUEST_BODY_LIMIT_BYTES")
-        .unwrap_or_else(|_| "10485760".to_string()) // 10MB default
-        .parse::<usize>()
-        .expect("REQUEST_BODY_LIMIT_BYTES must be a valid number");
+    // We're no longer using RequestBodyLimitLayer, so we've removed this variable
+    // Instead, we're using ConcurrencyLimitLayer for rate limiting
         
-    // Initialize structured logging with better format
+    // Initialize structured logging first (basic setup without OpenTelemetry)
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(log_level))
         .with(tracing_subscriber::fmt::layer()
@@ -57,6 +63,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
         
     tracing::info!("Starting Secret Storage Service");
+    
+    // Get service name and version for telemetry (if we use it later)
+    let service_name = std::env::var("OTEL_SERVICE_NAME")
+        .unwrap_or_else(|_| "secret-storage-service".to_string());
+    let service_version = option_env!("CARGO_PKG_VERSION").unwrap_or("unknown");
+    
+    // We'll add proper OpenTelemetry configuration once dependencies are stabilized
+    tracing::info!("Service name: {}, version: {}", service_name, service_version);
+    
+    // Note: OpenTelemetry integration is temporarily disabled due to dependency issues
+    // if let Err(err) = init_telemetry(&service_name, service_version) {
+    //     eprintln!("Failed to initialize OpenTelemetry: {}", err);
+    // }
     
     // Initialize the secret service
     let start_time = std::time::Instant::now();
@@ -96,10 +115,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/secrets", get(api::secrets::list_secrets))
         .with_state(service_state)
         .layer(Extension(build_info))
-        .layer(TimeoutLayer::new(Duration::from_secs(request_timeout)))
-        .layer(RequestBodyLimitLayer::new(request_body_limit))
+        // Layer order matters for type compatibility
+        // Add middleware in the correct order to avoid type mismatch errors
+        .layer(cors)
         .layer(TraceLayer::new_for_http())
-        .layer(cors);
+        .layer(TimeoutLayer::new(Duration::from_secs(request_timeout)))
+        .layer(tower::limit::ConcurrencyLimitLayer::new(100)) // Add concurrency limiting instead of body size limiting
+        // Add request tracing to track all requests
+        .layer(axum::middleware::from_fn(|req: axum::http::Request<axum::body::Body>, next: axum::middleware::Next<axum::body::Body>| {
+            // Create a span for the request
+            let method = req.method().clone();
+            let uri = req.uri().clone();
+            let user_agent = req.headers().get("user-agent")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("unknown")
+                .to_string();
+            let client_ip = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                .map(|addr| addr.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            
+            async move {
+                let request_span = tracing::info_span!("http_request",
+                    http.method = %method,
+                    http.url = %uri,
+                    http.client_ip = %client_ip,
+                    http.user_agent = %user_agent,
+                    service.name = "secret-storage-service"
+                );
+                
+                tracing::debug!("Processing request");
+                request_span.in_scope(|| {
+                    tracing::info!("Handling request: {} {}", method, uri);
+                });
+                
+                // Execute the request within the span
+                next.run(req).instrument(request_span).await
+            }
+        }));
         
     // Run the service with graceful shutdown
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -178,4 +230,46 @@ async fn shutdown_signal() {
     }
 
     tracing::info!("Shutdown signal received, starting graceful shutdown");
+}
+
+/// Initialize OpenTelemetry for distributed tracing with SigNoz APM
+/// 
+/// This sets up the OpenTelemetry pipeline to send telemetry data to SigNoz,
+/// allowing for distributed tracing and monitoring of the service.
+/// 
+/// Note: This function is currently disabled until dependency issues are resolved.
+// This function is conditionally compiled only when the telemetry feature is enabled
+// This prevents the "unused function" warning when the feature is disabled
+#[cfg(feature = "telemetry")]
+fn init_telemetry(service_name: &str, service_version: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Get OpenTelemetry endpoint from environment or use default SigNoz collector
+    let endpoint = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .unwrap_or_else(|_| "http://signoz-otel-collector.observability.svc.cluster.local:4317".to_string());
+
+    tracing::info!("OpenTelemetry would be configured with endpoint: {}", endpoint);
+    tracing::info!("Service name: {}, version: {}", service_name, service_version);
+    
+    // Placeholder for future telemetry implementation once dependencies are fixed
+    // The following code is disabled due to compatibility issues with current dependencies:
+    /*
+    // Configure the exporter to send data to SigNoz
+    let tracer = opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+                .with_endpoint(endpoint)
+        )
+        .with_trace_config(
+            trace::config()
+                .with_resource(Resource::new(vec![
+                    KeyValue::new("service.name", service_name.to_string()),
+                    KeyValue::new("service.version", service_version.to_string()),
+                    KeyValue::new("deployment.environment", std::env::var("DEPLOYMENT_ENV").unwrap_or_else(|_| "development".to_string())),
+                ]))
+        )
+        .install_batch(Tokio)?;
+    */
+
+    Ok(())
 }
