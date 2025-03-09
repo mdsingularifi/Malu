@@ -1,0 +1,11 @@
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: secret-storage-service-mtls
+  namespace: malu
+spec:
+  selector:
+    matchLabels:
+      app: secret-storage-service
+  mtls:
+    mode: STRICT

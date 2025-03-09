@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: secret-storage-service
+  labels:
+    app: secret-storage-service
+    app.kubernetes.io/name: secret-storage-service
+    app.kubernetes.io/part-of: malu
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    app: secret-storage-service

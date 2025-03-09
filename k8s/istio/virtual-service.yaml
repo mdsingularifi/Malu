@@ -1,0 +1,52 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: secret-storage-service
+  namespace: malu
+spec:
+  hosts:
+  - "secrets-api.malu.local"
+  - "secret-storage-service.malu.svc.cluster.local"
+  gateways:
+  - malu-gateway
+  - mesh # Also applies to mesh-internal traffic
+  http:
+  - match:
+    - uri:
+        prefix: /api/v1/secrets
+    route:
+    - destination:
+        host: secret-storage-service.malu.svc.cluster.local
+        subset: v1  # Use the v1 subset
+        port:
+          number: 80
+      weight: 100  # 100% of traffic goes to v1
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+      retryOn: gateway-error,connect-failure,refused-stream
+    timeout: 5s
+    corsPolicy:
+      allowOrigins:
+      - exact: "https://malu.local"
+      allowMethods:
+      - GET
+      - POST
+      - DELETE
+      - OPTIONS
+      allowHeaders:
+      - Authorization
+      - Content-Type
+      maxAge: "24h"
+  - match:
+    - uri:
+        exact: /health
+    - uri:
+        prefix: /metrics
+    route:
+    - destination:
+        host: secret-storage-service.malu.svc.cluster.local
+        subset: v1  # Use the v1 subset for monitoring endpoints
+        port:
+          number: 80
+      weight: 100  # 100% of traffic goes to v1

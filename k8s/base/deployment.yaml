@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secret-storage-service
+  labels:
+    app: secret-storage-service
+    app.kubernetes.io/name: secret-storage-service
+    app.kubernetes.io/part-of: malu
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: secret-storage-service
+  template:
+    metadata:
+      labels:
+        app: secret-storage-service
+        version: v1  # Add version label for Istio traffic splitting
+        service.istio.io/canonical-name: secret-storage-service  # For telemetry aggregation
+        service.istio.io/canonical-revision: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/metrics"
+        prometheus.io/port: "3000"
+        sidecar.istio.io/inject: "true"  # Explicitly enable Istio sidecar injection
+        sidecar.istio.io/rewriteAppHTTPProbers: "true"  # Let Istio proxy handle health checks
+    spec:
+      containers:
+      - name: secret-storage-service
+        image: ${IMAGE_REPOSITORY}/secret-storage-service:${IMAGE_TAG}
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: PORT
+          value: "3000"
+        - name: LOG_LEVEL
+          value: "info,tower_http=debug"
+        - name: REQUEST_TIMEOUT_SECS
+          value: "30"
+        - name: REQUEST_BODY_LIMIT_BYTES
+          value: "10485760"
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: redis-credentials
+              key: url
+        - name: OTEL_SERVICE_NAME
+          value: "secret-storage-service"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://signoz-otel-collector.observability.svc.cluster.local:4317"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=secret-storage-service,service.namespace=malu,service.version=${IMAGE_TAG}"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        resources:
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          capabilities:
+            drop:
+            - ALL
+      securityContext:
+        fsGroup: 1000
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - secret-storage-service
+              topologyKey: "kubernetes.io/hostname"
