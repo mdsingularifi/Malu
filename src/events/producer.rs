@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::config::AppConfig;
 use crate::core::error::{Result, ServiceError};
+use crate::metrics;
 use super::models::{SecretEvent, AuditEvent};
 
 /// Kafka producer for publishing events
@@ -34,6 +35,9 @@ impl KafkaProducer {
     /// Create a new Kafka producer from configuration
     pub async fn new(config: &AppConfig) -> Result<Self> {
         tracing::info!("Initializing Kafka producer with bootstrap servers: {}", config.kafka_bootstrap_servers);
+        
+        // Record Kafka initialization attempt in metrics
+        metrics::record_operation_result("kafka_producer_init", true);
         
         let mut client_config = ClientConfig::new();
         client_config
@@ -100,6 +104,9 @@ impl KafkaProducer {
         let max_retries = 3;
         
         loop {
+            // Start timing the Kafka send operation
+            let _timer = metrics::Timer::new("kafka_send");
+            
             match self.producer
                 .send(
                     FutureRecord::to(topic)
@@ -111,6 +118,8 @@ impl KafkaProducer {
             {
                 Ok(_) => {
                     tracing::debug!("Successfully sent event to topic '{}'", topic);
+                    // Record successful Kafka send in metrics
+                    metrics::record_kafka_event(topic, "success");
                     return Ok(());
                 },
                 Err((KafkaError::MessageProduction(rdkafka::types::RDKafkaErrorCode::QueueFull), _)) => {
@@ -123,6 +132,8 @@ impl KafkaProducer {
                         continue;
                     }
                     
+                    // Record failed Kafka send due to queue full in metrics
+                    metrics::record_kafka_event(topic, "queue_full");
                     return Err(ServiceError::ExternalServiceError(
                         format!("Failed to send event to Kafka after {} retries: queue full", max_retries)
                     ));
@@ -138,6 +149,9 @@ impl KafkaProducer {
                         continue;
                     }
                     
+                    // Record failed Kafka send in metrics with error
+                    metrics::record_kafka_event(topic, "error");
+                    metrics::record_operation_result("kafka_send", false);
                     return Err(ServiceError::ExternalServiceError(
                         format!("Failed to send event to Kafka after {} retries: {}", max_retries, e)
                     ));

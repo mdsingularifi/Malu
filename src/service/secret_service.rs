@@ -11,6 +11,7 @@ use crate::core::{
 use crate::events::{producer::KafkaProducer, consumer::KafkaConsumer, handler::EventHandler};
 use crate::events::models::{SecretEvent, AuditEvent, SecretAction, AuditEventType};
 use crate::config::AppConfig;
+use crate::metrics;
 
 /// Secret Storage Service main service implementation
 #[derive(Clone)]
@@ -39,8 +40,15 @@ impl SecretService {
         
         let namespaced_path = format!("{}/{}", namespace, path);
         
+        // Create a timer to measure operation duration
+        let _timer = metrics::Timer::new("store_secret");
+        
         // Store the secret using MaluStore
         let result = self.store.store_secret(&namespaced_path, &decoded).await;
+        
+        // Record the operation result for metrics
+        metrics::record_storage_operation("store", if result.is_ok() { "success" } else { "failure" });
+        metrics::record_operation_result("store_secret", result.is_ok());
         
         // Publish event
         if let Some(producer) = &self.event_producer {
@@ -69,9 +77,13 @@ impl SecretService {
             // Send the event asynchronously - don't wait for it to complete
             // and don't let event errors affect the main operation
             tokio::spawn(async move {
-                if let Err(e) = producer.produce_secret_event(event).await {
+                let result = producer.produce_secret_event(event).await;
+                if let Err(e) = &result {
                     tracing::error!("Failed to publish secret event: {}", e);
                 }
+                // Record Kafka event metrics
+                metrics::record_kafka_event("secret_events", 
+                    if result.is_ok() { "success" } else { "failure" });
             });
         }
         
@@ -82,8 +94,15 @@ impl SecretService {
     pub async fn retrieve_secret(&self, path: &str, namespace: &str, username: Option<&str>) -> Result<String> {
         let namespaced_path = format!("{}/{}", namespace, path);
         
+        // Create a timer to measure operation duration
+        let _timer = metrics::Timer::new("retrieve_secret");
+        
         // Retrieve the secret using MaluStore
         let result = self.store.retrieve_secret(&namespaced_path).await;
+        
+        // Record the operation result for metrics
+        metrics::record_storage_operation("retrieve", if result.is_ok() { "success" } else { "failure" });
+        metrics::record_operation_result("retrieve_secret", result.is_ok());
         
         // Publish event
         if let Some(producer) = &self.event_producer {
@@ -105,9 +124,13 @@ impl SecretService {
             
             // Send the event asynchronously
             tokio::spawn(async move {
-                if let Err(e) = producer.produce_secret_event(event).await {
+                let result = producer.produce_secret_event(event).await;
+                if let Err(e) = &result {
                     tracing::error!("Failed to publish secret event: {}", e);
                 }
+                // Record Kafka event metrics
+                metrics::record_kafka_event("secret_events", 
+                    if result.is_ok() { "success" } else { "failure" });
             });
         }
         
@@ -125,8 +148,15 @@ impl SecretService {
     pub async fn delete_secret(&self, path: &str, namespace: &str, username: Option<&str>) -> Result<()> {
         let namespaced_path = format!("{}/{}", namespace, path);
         
+        // Create a timer to measure operation duration
+        let _timer = metrics::Timer::new("delete_secret");
+        
         // Delete the secret
         let result = self.store.delete_secret(&namespaced_path).await;
+        
+        // Record the operation result for metrics
+        metrics::record_storage_operation("delete", if result.is_ok() { "success" } else { "failure" });
+        metrics::record_operation_result("delete_secret", result.is_ok());
         
         // Publish event
         if let Some(producer) = &self.event_producer {
@@ -148,9 +178,13 @@ impl SecretService {
             
             // Send the event asynchronously
             tokio::spawn(async move {
-                if let Err(e) = producer.produce_secret_event(event).await {
+                let result = producer.produce_secret_event(event).await;
+                if let Err(e) = &result {
                     tracing::error!("Failed to publish secret event: {}", e);
                 }
+                // Record Kafka event metrics
+                metrics::record_kafka_event("secret_events", 
+                    if result.is_ok() { "success" } else { "failure" });
             });
         }
         
@@ -163,8 +197,20 @@ impl SecretService {
             .map(|p| format!("{}/{}", namespace, p))
             .or_else(|| Some(format!("{}/", namespace)));
         
+        // Create a timer to measure operation duration
+        let _timer = metrics::Timer::new("list_secrets");
+        
         // List the secrets
         let result = self.store.list_secrets(namespaced_prefix.as_deref()).await;
+        
+        // Record the operation result for metrics
+        metrics::record_storage_operation("list", if result.is_ok() { "success" } else { "failure" });
+        metrics::record_operation_result("list_secrets", result.is_ok());
+        
+        // If the operation was successful, record the count of secrets
+        if let Ok(ref secrets) = result {
+            metrics::record_secret_count(secrets.len());
+        }
         
         // Publish event
         if let Some(producer) = &self.event_producer {
@@ -187,9 +233,13 @@ impl SecretService {
             
             // Send the event asynchronously
             tokio::spawn(async move {
-                if let Err(e) = producer.produce_secret_event(event).await {
+                let result = producer.produce_secret_event(event).await;
+                if let Err(e) = &result {
                     tracing::error!("Failed to publish secret event: {}", e);
                 }
+                // Record Kafka event metrics
+                metrics::record_kafka_event("secret_events", 
+                    if result.is_ok() { "success" } else { "failure" });
             });
         }
         
@@ -275,6 +325,40 @@ impl SecretService {
     #[allow(dead_code)]
     pub fn get_config(&self) -> &AppConfig {
         &self.config
+    }
+    
+    /// Check storage health by attempting a simple operation
+    /// 
+    /// Returns:
+    /// - Ok(true) if the storage is healthy and can be accessed
+    /// - Ok(false) if the storage is unhealthy or cannot be accessed
+    /// - Err if an unexpected error occurs
+    pub async fn check_storage_health(&self) -> Result<bool> {
+        // Try to list secrets with a non-existent path to check connectivity
+        // We use a random path to avoid any potential cache effects
+        let test_path = format!("_health_check_{}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos());
+        
+        // Create a timer to measure health check duration
+        let _timer = metrics::Timer::new("check_storage_health");
+            
+        let health_result = match self.store.list_secrets(Some(&test_path)).await {
+            // Storage is accessible (empty list is fine)
+            Ok(_) => Ok(true),
+            // If we get a not found error, that's actually good - means we connected to storage
+            Err(e) if e.to_string().contains("not found") => Ok(true),
+            // Any other error indicates a problem
+            Err(_) => Ok(false),
+        };
+        
+        // Record the health check result in metrics
+        if let Ok(is_healthy) = health_result {
+            metrics::record_operation_result("storage_health_check", is_healthy);
+        }
+        
+        health_result
     }
 }
 

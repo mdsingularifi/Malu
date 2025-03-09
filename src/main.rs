@@ -4,13 +4,13 @@ mod models;
 mod core;
 mod config;
 mod events;
+mod metrics;
 
 use axum::{
     routing::{get, post, delete},
     Router,
-    http::{StatusCode, Method},
+    http::Method,
     response::IntoResponse,
-    Json,
     extract::Extension,
     middleware::map_request,
 };
@@ -80,6 +80,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     eprintln!("Failed to initialize OpenTelemetry: {}", err);
     // }
     
+    // Initialize Prometheus metrics
+    metrics::init_metrics();
+    tracing::info!("Prometheus metrics initialized and ready to collect data");
+    
     // Initialize the secret service
     let start_time = std::time::Instant::now();
     let (secret_service, _consumer) = match service::secret_service::init_secret_service().await {
@@ -100,6 +104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let build_info = Arc::new(BuildInfo {
         version: version.to_string(),
         build_timestamp: build_timestamp.to_string(),
+        start_time: std::time::SystemTime::now(),
     });
     
     // Define CORS policy - properly restrictive for production
@@ -116,14 +121,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         
     // Build our application routes with layers for timeouts, rate limiting, etc.
     let app = Router::new()
-        .route("/health", get(health_check))
+        // Health check endpoints
+        .route("/health", get(api::health::health_check))
+        .route("/readiness", get(api::health::readiness_check))
+        .route("/liveness", get(api::health::liveness_probe))
         .route("/metrics", get(metrics_endpoint))
         .route("/api/v1/secrets", post(api::secrets::create_secret))
         .route("/api/v1/secrets/:path", get(api::secrets::get_secret))
         .route("/api/v1/secrets/:path", delete(api::secrets::delete_secret))
         .route("/api/v1/secrets", get(api::secrets::list_secrets))
-        .with_state(service_state)
+        .with_state(Arc::clone(&service_state))
+        .layer(Extension(Arc::clone(&service_state)))
         .layer(Extension(build_info))
+        // Register middleware to track metrics for each request
+        .layer(axum::middleware::map_response(|response: axum::response::Response| async {
+            // Record the metrics after the request is processed
+            let status = response.status().as_u16();
+            
+            // Use a generic endpoint name since we can't access the route here
+            // The actual route metrics will be handled by our handler functions
+            metrics::record_request("api", status);
+            
+            // Also record current memory usage periodically
+            let usage = std::process::Command::new("sh")
+                .arg("-c")
+                .arg("ps -o rss= -p $$")
+                .output()
+                .ok()
+                .and_then(|output| {
+                    String::from_utf8(output.stdout).ok()
+                        .and_then(|s| s.trim().parse::<f64>().ok())
+                        .map(|kb| kb / 1024.0) // Convert KB to MB
+                })
+                .unwrap_or(50.0); // Default to 50MB if parsing fails
+                
+            metrics::record_memory_usage(usage);
+            response
+        }))
         // Layer order matters for type compatibility
         // Add middleware in the correct order to avoid type mismatch errors
         .layer(cors)
@@ -226,29 +260,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // Build information structure
-#[derive(Clone)]
-struct BuildInfo {
-    version: String,
-    build_timestamp: String,
-}
+// Using our health module's BuildInfo instead
+use crate::api::health::BuildInfo;
 
-/// Enhanced health check with more detailed information
-async fn health_check(build_info: axum::extract::Extension<Arc<BuildInfo>>) -> impl IntoResponse {
-    let build_info = build_info.0;
-    
-    let health_info = serde_json::json!({
-        "status": "ok",
-        "version": build_info.version,
-        "build_timestamp": build_info.build_timestamp,
-        "uptime": "simulated",
-    });
-    
-    Json(health_info)
-}
-
-/// Metrics endpoint (stub for now - would integrate with prometheus in production)
+/// Metrics endpoint that returns Prometheus-formatted metrics
 async fn metrics_endpoint() -> impl IntoResponse {
-    (StatusCode::OK, "Metrics would go here in production")
+    let metrics_text = metrics::gather_metrics();
+    ([(hyper::header::CONTENT_TYPE, "text/plain; version=0.0.4")], metrics_text)
 }
 
 /// Signal handler for graceful shutdown

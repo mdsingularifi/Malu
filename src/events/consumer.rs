@@ -14,6 +14,7 @@ use futures::stream::StreamExt;
 
 use crate::config::AppConfig;
 use crate::core::error::{Result, ServiceError};
+use crate::metrics;
 use super::handler::EventHandler;
 use super::models::{SecretEvent, AuditEvent};
 
@@ -28,6 +29,9 @@ impl KafkaConsumer {
     /// Create a new Kafka consumer from configuration
     pub async fn new(config: &AppConfig) -> Result<Self> {
         tracing::info!("Initializing Kafka consumer with bootstrap servers: {}", config.kafka_bootstrap_servers);
+        
+        // Record Kafka consumer initialization in metrics
+        metrics::record_operation_result("kafka_consumer_init", true);
         
         Ok(Self {
             config: config.clone(),
@@ -54,6 +58,8 @@ impl KafkaConsumer {
         spawn(async move {
             if let Err(e) = Self::consume_topic(&config1, &secret_topic, secret_handler, Self::process_secret_event).await {
                 tracing::error!("Error in secret events consumer: {}", e);
+                metrics::record_kafka_event("secret_events_consumer", "error");
+                metrics::record_operation_result("kafka_consumer", false);
             }
         });
         
@@ -62,6 +68,8 @@ impl KafkaConsumer {
         spawn(async move {
             if let Err(e) = Self::consume_topic(&config2, &audit_topic, audit_handler, Self::process_audit_event).await {
                 tracing::error!("Error in audit events consumer: {}", e);
+                metrics::record_kafka_event("audit_events_consumer", "error");
+                metrics::record_operation_result("kafka_consumer", false);
             }
         });
         
@@ -83,9 +91,17 @@ impl KafkaConsumer {
         // Use outer loop for reconnection logic
         loop {
             let consumer: StreamConsumer = match Self::create_consumer(config, topic) {
-                Ok(c) => c,
+                Ok(c) => {
+                    // Record successful consumer creation
+                    metrics::record_kafka_event(topic, "consumer_connected");
+                    metrics::record_operation_result("kafka_consumer_connection", true);
+                    c
+                },
                 Err(e) => {
                     tracing::error!("Failed to create Kafka consumer: {}", e);
+                    // Record failed consumer creation in metrics
+                    metrics::record_kafka_event(topic, "consumer_connection_failed");
+                    metrics::record_operation_result("kafka_consumer_connection", false);
                     tokio::time::sleep(Duration::from_secs(5)).await;
                     continue;
                 }
@@ -100,32 +116,54 @@ impl KafkaConsumer {
             loop {
                 match message_stream.next().await {
                     Some(message_result) => {
+                        // Start a timer for message processing
+                        let _timer = metrics::Timer::new(format!("kafka_message_processing_{}", topic).as_str());
+                        
                         match message_result {
                             Ok(message) => {
+                                // Record message received in metrics
+                                metrics::record_kafka_event(topic, "message_received");
                                 if let Some(payload) = message.payload() {
                                     match process_fn(payload) {
                                         Ok(event) => {
                                             // Lock the handler and process the event
                                             let mut guard = handler.lock().await;
-                                            if let Err(e) = guard.handle_event(event).await {
+                                            let result = guard.handle_event(event).await;
+                                            if let Err(e) = result {
                                                 tracing::error!("Error handling event: {}", e);
+                                                metrics::record_kafka_event(topic, "event_handling_error");
+                                                metrics::record_operation_result("kafka_event_handling", false);
+                                            } else {
+                                                metrics::record_kafka_event(topic, "event_handling_success");
+                                                metrics::record_operation_result("kafka_event_handling", true);
                                             }
                                         },
                                         Err(e) => {
                                             tracing::error!("Error processing event: {}", e);
+                                            metrics::record_kafka_event(topic, "event_processing_error");
+                                            metrics::record_operation_result("kafka_event_processing", false);
                                         }
                                     }
                                 } else {
                                     tracing::warn!("Received message with empty payload");
+                                    metrics::record_kafka_event(topic, "empty_payload");
                                 }
                                 
                                 // Commit the message
-                                if let Err(e) = consumer.commit_message(&message, CommitMode::Async) {
+                                let commit_result = consumer.commit_message(&message, CommitMode::Async);
+                                if let Err(e) = commit_result {
                                     tracing::error!("Error committing message: {}", e);
+                                    metrics::record_kafka_event(topic, "commit_error");
+                                    metrics::record_operation_result("kafka_message_commit", false);
+                                } else {
+                                    metrics::record_kafka_event(topic, "commit_success");
+                                    metrics::record_operation_result("kafka_message_commit", true);
                                 }
                             },
                             Err(e) => {
                                 tracing::error!("Error receiving Kafka message: {}", e);
+                                metrics::record_kafka_event(topic, "message_receive_error");
+                                metrics::record_operation_result("kafka_message_receive", false);
                                 // Break inner loop to reconnect
                                 break;
                             }
@@ -133,6 +171,7 @@ impl KafkaConsumer {
                     },
                     None => {
                         tracing::info!("Kafka consumer stream ended, reconnecting...");
+                        metrics::record_kafka_event(topic, "stream_ended");
                         // Break inner loop to reconnect
                         break;
                     }
