@@ -1,9 +1,0 @@
-//! Observability component for the Malu system
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
-}
