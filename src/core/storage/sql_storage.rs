@@ -202,23 +202,51 @@ pub async fn create_sql_storage_provider(
     database_url: &str,
     table_name: Option<&str>
 ) -> Result<Arc<SqlStorageProvider>> {
-    // Use "secrets" as the default table name if none is provided
-    let table_name = table_name.unwrap_or("secrets");
+    use std::env;
     
-    // Connect to the database
+    // Use environment variable or fallback to provided value or default
+    let table_name = env::var("DB_TABLE_NAME")
+        .unwrap_or_else(|_| table_name.unwrap_or("secrets").to_string());
+    
+    // Get database connection settings from environment variables
+    let max_connections = env::var("DB_MAX_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(5);
+        
+    let acquire_timeout = env::var("DB_ACQUIRE_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(30);
+        
+    let min_connections = env::var("DB_MIN_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(1);
+    
+    tracing::info!(
+        "Creating SQL storage with table: {}, max connections: {}, timeout: {}s", 
+        table_name, max_connections, acquire_timeout
+    );
+    
+    // Connect to the database with configured options
     let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(max_connections)
+        .min_connections(min_connections)
+        .acquire_timeout(std::time::Duration::from_secs(acquire_timeout))
         .connect(database_url)
         .await
         .map_err(|e| {
             ServiceError::StorageError(format!("Failed to connect to database: {}", e))
         })?;
     
-    let provider = SqlStorageProvider::new(pool, table_name.to_string());
+    // Clone table_name for logging since SqlStorageProvider::new takes ownership
+    let table_name_for_logging = table_name.clone();
+    let provider = SqlStorageProvider::new(pool, table_name);
     
     // Initialize the schema
     provider.init_schema().await?;
     
-    tracing::info!("Created SQL storage provider with table: {}", table_name);
+    tracing::info!("Created SQL storage provider with table: {}", table_name_for_logging);
     Ok(Arc::new(provider))
 }

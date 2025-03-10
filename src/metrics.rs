@@ -100,6 +100,31 @@ pub fn record_operation_result(operation: &str, success: bool) {
     counter!("operation_results_total", 1, "operation" => operation.to_string(), "status" => status.to_string());
 }
 
+/// Record when dynamic secrets functionality is initialized
+pub fn dynamic_secrets_initialized() {
+    counter!("dynamic_secrets_initialized", 1);
+}
+
+/// Record when a dynamic secret is generated
+pub fn dynamic_secret_generated(provider_type: &str) {
+    counter!("dynamic_secrets_generated", 1, "provider" => provider_type.to_string());
+}
+
+/// Record when a dynamic secret is revoked
+pub fn dynamic_secret_revoked() {
+    counter!("dynamic_secrets_revoked", 1);
+}
+
+/// Record when a dynamic secret is renewed
+pub fn dynamic_secret_renewed() {
+    counter!("dynamic_secrets_renewed", 1);
+}
+
+/// Record the count of active leases
+pub fn record_active_leases_count(count: usize) {
+    gauge!("active_leases_total", count as f64);
+}
+
 /// Middleware for tracking API request metrics
 pub struct MetricsMiddleware {
     pub endpoint: String,
@@ -127,6 +152,21 @@ pub fn init_metrics() {
     counter!("api_requests_total", 0, "endpoint" => "get_secret", "status" => "200");
     counter!("api_requests_total", 0, "endpoint" => "delete_secret", "status" => "204");
     counter!("api_requests_total", 0, "endpoint" => "list_secrets", "status" => "200");
+    
+    // Initialize dynamic secrets metrics
+    counter!("dynamic_secrets_initialized", 0);
+    counter!("dynamic_secrets_generated", 0, "provider" => "database");
+    counter!("dynamic_secrets_generated", 0, "provider" => "api_token");
+    counter!("dynamic_secrets_revoked", 0);
+    counter!("dynamic_secrets_renewed", 0);
+    gauge!("active_leases_total", 0.0);
+    
+    // Initialize dynamic secret API endpoints
+    counter!("api_requests_total", 0, "endpoint" => "generate_dynamic_secret", "status" => "201");
+    counter!("api_requests_total", 0, "endpoint" => "list_dynamic_leases", "status" => "200");
+    counter!("api_requests_total", 0, "endpoint" => "get_dynamic_lease", "status" => "200");
+    counter!("api_requests_total", 0, "endpoint" => "revoke_dynamic_secret", "status" => "204");
+    counter!("api_requests_total", 0, "endpoint" => "renew_dynamic_secret", "status" => "200");
     
     tracing::info!("Metrics system initialized");
 }

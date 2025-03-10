@@ -122,13 +122,63 @@ pub async fn create_redis_storage_provider(
     redis_url: &str,
     prefix: Option<&str>
 ) -> Result<Arc<RedisStorageProvider>> {
-    // Use "secrets" as the default prefix if none is provided
-    let prefix = prefix.unwrap_or("secrets");
-    let provider = RedisStorageProvider::new(redis_url, prefix)?;
+    use std::env;
     
-    // Test the connection
-    let conn = provider.get_connection().await?;
-    drop(conn);
+    // Use environment variable or fallback to provided value or default
+    let prefix = env::var("REDIS_KEY_PREFIX")
+        .unwrap_or_else(|_| prefix.unwrap_or("secrets").to_string());
+
+    // Get connection timeout from environment
+    let connection_timeout = env::var("REDIS_CONNECTION_TIMEOUT")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(5);
+
+    // For logging purposes
+    tracing::info!("Creating Redis storage provider with prefix: {}, timeout: {}s", 
+                  prefix, connection_timeout);
+        
+    // Create the Redis client with timeout settings
+    // Note: We can't easily configure the Redis client with the timeout from here
+    // as the RedisStorageProvider::new doesn't expose that configuration, but we're
+    // logging it for info purposes
+    let provider = RedisStorageProvider::new(redis_url, &prefix)?;
+    
+    // Test the connection with retry logic
+    let max_retries = env::var("REDIS_MAX_RETRIES")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(3);
+    
+    let mut retry_count = 0;
+    let mut last_error = None;
+    
+    while retry_count < max_retries {
+        match provider.get_connection().await {
+            Ok(conn) => {
+                drop(conn);
+                tracing::info!("Successfully connected to Redis");
+                break;
+            },
+            Err(e) => {
+                retry_count += 1;
+                last_error = Some(e);
+                if retry_count < max_retries {
+                    let delay = std::time::Duration::from_secs(1);
+                    tracing::warn!("Failed to connect to Redis, retrying in {:?}... ({}/{})", 
+                                  delay, retry_count, max_retries);
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+    
+    // If we've exhausted all retries, return the last error
+    if let Some(error) = last_error {
+        if retry_count >= max_retries {
+            return Err(error);
+        }
+    }
     
     tracing::info!("Created Redis storage provider with prefix: {}", prefix);
     Ok(Arc::new(provider))

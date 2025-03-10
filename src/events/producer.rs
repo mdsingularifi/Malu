@@ -39,11 +39,28 @@ impl KafkaProducer {
         // Record Kafka initialization attempt in metrics
         metrics::record_operation_result("kafka_producer_init", true);
         
+        // Get additional configuration from environment variables
+        let message_timeout_ms = std::env::var("KAFKA_MESSAGE_TIMEOUT_MS")
+            .unwrap_or_else(|_| "5000".to_string());
+            
+        let queue_buffering_max_ms = std::env::var("KAFKA_QUEUE_BUFFERING_MAX_MS")
+            .unwrap_or_else(|_| "100".to_string());
+            
+        let retry_backoff_ms = std::env::var("KAFKA_RETRY_BACKOFF_MS")
+            .unwrap_or_else(|_| "100".to_string());
+            
+        let compression_type = std::env::var("KAFKA_COMPRESSION_TYPE")
+            .unwrap_or_else(|_| "none".to_string());
+        
+        // Configure the Kafka client
         let mut client_config = ClientConfig::new();
         client_config
             .set("bootstrap.servers", &config.kafka_bootstrap_servers)
             .set("client.id", &config.kafka_client_id)
-            .set("message.timeout.ms", "5000");
+            .set("message.timeout.ms", &message_timeout_ms)
+            .set("queue.buffering.max.ms", &queue_buffering_max_ms)
+            .set("retry.backoff.ms", &retry_backoff_ms)
+            .set("compression.type", &compression_type);
         
         // Configure security if provided
         if let Some(protocol) = &config.kafka_security_protocol {
@@ -90,29 +107,45 @@ impl KafkaProducer {
         let payload = serde_json::to_string(event)
             .map_err(|e| ServiceError::SerializationError(e.to_string()))?;
         
+        // Get max message size from environment or use default
+        let max_payload_size = std::env::var("KAFKA_MAX_PAYLOAD_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(950_000); // Default to 950KB as a safe threshold
+        
         // Check payload size (Kafka typically has a default max message size of 1MB)
-        if payload.len() > 950_000 { // Use 950KB as a safe threshold
+        if payload.len() > max_payload_size {
             return Err(ServiceError::ValidationError(
-                format!("Event payload too large: {} bytes (max 950KB)", payload.len())
+                format!("Event payload too large: {} bytes (max {}KB)", 
+                       payload.len(), max_payload_size / 1000)
             ));
         }
             
         tracing::debug!("Sending event to topic '{}' with key '{}': {}", topic, key, payload);
         
-        // Try to send with retries
+        // Try to send with retries - get retry settings from environment
         let mut retries = 0;
-        let max_retries = 3;
+        let max_retries = std::env::var("KAFKA_MAX_RETRIES")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(3);
         
         loop {
             // Start timing the Kafka send operation
             let _timer = metrics::Timer::new("kafka_send");
             
-            match self.producer
+            // Get message delivery timeout from environment or use default
+        let delivery_timeout_secs = std::env::var("KAFKA_DELIVERY_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(5);
+            
+        match self.producer
                 .send(
                     FutureRecord::to(topic)
                         .payload(&payload)
                         .key(key),
-                    Duration::from_secs(5),
+                    Duration::from_secs(delivery_timeout_secs),
                 )
                 .await
             {
@@ -126,7 +159,21 @@ impl KafkaProducer {
                     // Queue is full, wait and retry
                     if retries < max_retries {
                         retries += 1;
-                        let backoff = std::cmp::min(Duration::from_millis(100 * 2_u64.pow(retries)), Duration::from_secs(2));
+                        // Get backoff settings from environment or use defaults
+                        let base_backoff_ms = std::env::var("KAFKA_QUEUE_BACKOFF_BASE_MS")
+                            .ok()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(100);
+                            
+                        let max_backoff_ms = std::env::var("KAFKA_QUEUE_BACKOFF_MAX_MS")
+                            .ok()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(2000);
+                            
+                        let backoff = std::cmp::min(
+                            Duration::from_millis(base_backoff_ms * 2_u64.pow(retries)),
+                            Duration::from_millis(max_backoff_ms)
+                        );
                         tracing::warn!("Kafka queue full, retrying in {:?} (attempt {}/{})", backoff, retries, max_retries);
                         tokio::time::sleep(backoff).await;
                         continue;
@@ -142,7 +189,21 @@ impl KafkaProducer {
                     // For other errors, retry with backoff
                     if retries < max_retries {
                         retries += 1;
-                        let backoff = std::cmp::min(Duration::from_millis(200 * 2_u64.pow(retries)), Duration::from_secs(3));
+                        // Get backoff settings from environment or use defaults
+                        let base_backoff_ms = std::env::var("KAFKA_ERROR_BACKOFF_BASE_MS")
+                            .ok()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(200);
+                            
+                        let max_backoff_ms = std::env::var("KAFKA_ERROR_BACKOFF_MAX_MS")
+                            .ok()
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .unwrap_or(3000);
+                            
+                        let backoff = std::cmp::min(
+                            Duration::from_millis(base_backoff_ms * 2_u64.pow(retries)),
+                            Duration::from_millis(max_backoff_ms)
+                        );
                         tracing::warn!("Error sending to Kafka, retrying in {:?} (attempt {}/{}): {}", 
                             backoff, retries, max_retries, e);
                         tokio::time::sleep(backoff).await;

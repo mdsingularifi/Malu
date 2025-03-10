@@ -6,7 +6,7 @@ use axum::{
 use std::sync::Arc;
 use serde_json::{json, Value};
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
-use crate::service::secret_service::SecretService;
+use crate::service::AppState;
 
 /// Build information structure for the service
 #[derive(Clone)]
@@ -57,13 +57,13 @@ pub async fn health_check(
 /// - Error details if any component is not ready
 pub async fn readiness_check(
     build_info: Extension<Arc<BuildInfo>>,
-    service: Extension<Arc<SecretService>>,
+    app_state: Extension<Arc<AppState>>,
 ) -> impl IntoResponse {
     let mut all_ready = true;
     let mut components: Vec<Value> = Vec::new();
     
     // Check storage engine
-    let _storage_status = match service.check_storage_health().await {
+    let _storage_status = match app_state.secret_service.check_storage_health().await {
         Ok(true) => {
             components.push(json!({
                 "name": "storage",

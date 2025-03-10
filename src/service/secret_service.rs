@@ -3,6 +3,8 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
+use crate::service::rotation_service::{RotationService, RotationPolicy, RotationSchedule, SecretType};
+
 use crate::core::{
     store::{MaluStore, MaluConfig},
     error::{Result, ServiceError},
@@ -23,12 +25,45 @@ pub struct SecretService {
     /// Configuration
     #[allow(dead_code)]
     config: AppConfig,
+    /// Secret rotation service
+    rotation_service: Option<Arc<RotationService>>,
+    /// Dynamic secrets initialized flag
+    dynamic_secrets_initialized: bool,
 }
 
 impl SecretService {
     /// Create a new SecretService with the provided MaluStore and optional event producer
     pub fn new(store: Arc<MaluStore>, event_producer: Option<Arc<KafkaProducer>>, config: AppConfig) -> Self {
-        Self { store, event_producer, config }
+        // Create rotation service if secret rotation is enabled in config
+        let rotation_service = if config.features.secret_rotation {
+            Some(Arc::new(RotationService::new(store.clone(), event_producer.clone())))
+        } else {
+            None
+        };
+        
+        Self { 
+            store, 
+            event_producer, 
+            config, 
+            rotation_service,
+            dynamic_secrets_initialized: false,
+        }
+    }
+    
+    /// Initialize the service and dependent services based on configuration settings
+    pub async fn initialize(&mut self) -> Result<()> {
+        // Initialize dynamic secrets if enabled in configuration
+        if self.config.features.dynamic_secrets {
+            tracing::info!("Initializing dynamic secrets functionality");
+            self.init_dynamic_secrets().await?;
+            tracing::info!("Dynamic secrets functionality initialized successfully");
+        } else {
+            tracing::info!("Dynamic secrets feature is disabled, skipping initialization");
+        }
+        
+        // Initialize any other features
+        
+        Ok(())
     }
     
     /// Store a secret with optional namespace and username
@@ -360,9 +395,99 @@ impl SecretService {
         
         health_result
     }
+    
+    /// Add a rotation policy for secrets
+    pub async fn add_rotation_policy(&self, policy: RotationPolicy) -> Result<()> {
+        if let Some(rotation_service) = &self.rotation_service {
+            rotation_service.add_policy(policy).await
+        } else {
+            Err(ServiceError::NotImplemented("Secret rotation is not enabled".to_string()))
+        }
+    }
+    
+    /// Get all rotation policies
+    pub async fn get_rotation_policies(&self) -> Result<Vec<RotationPolicy>> {
+        if let Some(rotation_service) = &self.rotation_service {
+            rotation_service.get_policies().await
+        } else {
+            Err(ServiceError::NotImplemented("Secret rotation is not enabled".to_string()))
+        }
+    }
+    
+    /// Rotate a secret immediately
+    pub async fn rotate_secret(&self, path: &str, namespace: &str, username: Option<&str>) -> Result<()> {
+        if let Some(rotation_service) = &self.rotation_service {
+            // Create a timer to measure operation duration
+            let _timer = metrics::Timer::new("rotate_secret");
+            
+            let result = rotation_service.rotate_secret(path, namespace, username).await;
+            
+            // Record the operation result for metrics
+            metrics::record_operation_result("rotate_secret", result.is_ok());
+            
+            result
+        } else {
+            Err(ServiceError::NotImplemented("Secret rotation is not enabled".to_string()))
+        }
+    }
+    
+    /// Store a secret and set up rotation for it based on the provided configuration
+    pub async fn store_secret_with_rotation(&self, path: &str, namespace: &str, data: &str, username: Option<&str>) -> Result<()> {
+        // First store the secret normally
+        self.store_secret(path, namespace, data, username).await?;
+        
+        // Check if rotation service is available
+        if let Some(rotation_service) = &self.rotation_service {
+            // Create a timer to measure operation duration
+            let _timer = metrics::Timer::new("store_secret_with_rotation");
+            
+            // Create a policy based on default parameters
+            // In a real implementation, we would use the rotation_config from the request
+            let policy = RotationPolicy::new(
+                format!("auto_rotation_for_{}", path),
+                RotationSchedule::Interval { seconds: 86400 }, // Daily rotation
+                path.to_string(),
+                namespace.to_string(),
+                true,  // automatic
+                5,     // versions to keep
+                SecretType::KeyValue,
+            );
+            
+            // Add the rotation policy
+            let result = rotation_service.add_policy(policy).await;
+            
+            // Record the operation result for metrics
+            metrics::record_operation_result("store_secret_with_rotation", result.is_ok());
+            
+            result
+        } else {
+            Err(ServiceError::NotImplemented("Secret rotation is not enabled".to_string()))
+        }
+    }
+    
+    /// Start the rotation scheduler
+    pub async fn start_rotation_scheduler(&self) -> Result<()> {
+        if let Some(rotation_service) = &self.rotation_service {
+            rotation_service.start_scheduler().await
+        } else {
+            Err(ServiceError::NotImplemented("Secret rotation is not enabled".to_string()))
+        }
+    }
+    
+    /// Stop the rotation scheduler
+    pub async fn stop_rotation_scheduler(&self) -> Result<()> {
+        if let Some(rotation_service) = &self.rotation_service {
+            rotation_service.stop_scheduler().await
+        } else {
+            Err(ServiceError::NotImplemented("Secret rotation is not enabled".to_string()))
+        }
+    }
 }
 
 /// Initialize the secret service with configuration from environment
+/// 
+/// This creates a new SecretService instance with the appropriate configuration
+/// and starts the rotation scheduler if secret rotation is enabled
 pub async fn init_secret_service() -> Result<(SecretService, Option<KafkaConsumer>)> {
     // Get configuration from environment
     let config = AppConfig::from_env()?;
@@ -463,8 +588,24 @@ pub async fn init_secret_service() -> Result<(SecretService, Option<KafkaConsume
     };
     
     // Create the service
-    let service = SecretService::new(store.clone(), event_producer.clone(), config_clone.clone());
+    let mut service = SecretService::new(store.clone(), event_producer.clone(), config_clone.clone());
+    
+    // Initialize the service components based on configuration
+    if let Err(e) = service.initialize().await {
+        tracing::error!("Failed to initialize service components: {}", e);
+        return Err(e);
+    }
     tracing::info!("Secret service successfully initialized");
+    
+    // Start the rotation scheduler if secret rotation is enabled
+    if config_clone.features.secret_rotation {
+        tracing::info!("Starting secret rotation scheduler");
+        if let Err(e) = service.start_rotation_scheduler().await {
+            tracing::error!("Failed to start rotation scheduler: {}", e);
+        } else {
+            tracing::info!("Secret rotation scheduler started successfully");
+        }
+    }
     
     // Initialize Kafka consumer if enabled
     let consumer = if config.kafka_enable_consumer {

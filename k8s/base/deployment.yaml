@@ -25,6 +25,50 @@ spec:
         sidecar.istio.io/inject: "true"  # Explicitly enable Istio sidecar injection
         sidecar.istio.io/rewriteAppHTTPProbers: "true"  # Let Istio proxy handle health checks
     spec:
+      volumes:
+      - name: api-tokens
+        secret:
+          secretName: api-tokens
+          items:
+          - key: api-token
+            path: api-token
+            mode: 0400
+      - name: temporary-storage
+        emptyDir: 
+          medium: Memory   # In-memory storage for sensitive data processing
+          sizeLimit: 50Mi # Limit the size
+      # Secret rotation using Kubernetes projected volumes
+      - name: redis-credentials
+        projected:
+          sources:
+          - secret:
+              name: redis-credentials
+              # Auto-refreshes when the secret is updated by external secret manager
+              optional: false
+      # TLS certificates managed by cert-manager
+      - name: service-certs
+        secret:
+          secretName: secret-service-tls
+          defaultMode: 0440
+      
+      initContainers:
+      # Security checks and initialization
+      - name: security-init
+        image: ${IMAGE_REPOSITORY}/security-scanner:latest
+        imagePullPolicy: Always
+        command: ["sh", "-c", "scan-vulnerabilities /app && setup-permissions /app/data"]
+        volumeMounts:
+        - name: temporary-storage
+          mountPath: /app/data
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      
       containers:
       - name: secret-storage-service
         image: ${IMAGE_REPOSITORY}/secret-storage-service:${IMAGE_TAG}
@@ -46,12 +90,56 @@ spec:
             secretKeyRef:
               name: redis-credentials
               key: url
+        # Enhanced authentication settings
+        - name: AUTH_REQUIRED
+          value: "true"
+        - name: AUTH_MODE
+          value: "jwt,mtls"
+        # Integration with vault for credential rotation
+        - name: VAULT_ADDR
+          value: "https://vault.malu-system.svc.cluster.local:8200"
+        - name: VAULT_AUTH_PATH
+          value: "kubernetes"
+        - name: VAULT_ROLE
+          value: "secret-storage-service"
+        - name: SECRETS_AUTO_ROTATION
+          value: "true"
+        - name: SECRETS_ROTATION_INTERVAL
+          value: "24h"
+        # Enhanced TLS settings
+        - name: TLS_ENABLED
+          value: "true"
+        - name: TLS_MIN_VERSION
+          value: "TLS1.3"
+        - name: TLS_CERT_PATH
+          value: "/certs/tls.crt"
+        - name: TLS_KEY_PATH
+          value: "/certs/tls.key"
+        # Telemetry settings
         - name: OTEL_SERVICE_NAME
           value: "secret-storage-service"
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: "http://signoz-otel-collector.observability.svc.cluster.local:4317"
         - name: OTEL_RESOURCE_ATTRIBUTES
           value: "service.name=secret-storage-service,service.namespace=malu,service.version=${IMAGE_TAG}"
+        # Audit logging enabled
+        - name: AUDIT_LOGGING_ENABLED
+          value: "true"
+        - name: AUDIT_LOG_LEVEL
+          value: "INFO"
+        
+        volumeMounts:
+        - name: api-tokens
+          mountPath: "/var/run/secrets/tokens"
+          readOnly: true
+        - name: temporary-storage
+          mountPath: "/app/data"
+        - name: redis-credentials
+          mountPath: "/var/run/secrets/redis"
+          readOnly: true
+        - name: service-certs
+          mountPath: "/certs"
+          readOnly: true
         readinessProbe:
           httpGet:
             path: /health
@@ -79,10 +167,19 @@ spec:
           capabilities:
             drop:
             - ALL
+            add:
+            - NET_BIND_SERVICE  # Only capability needed for binding to ports
           seccompProfile:
             type: RuntimeDefault
+          privileged: false
+          procMount: Default
       securityContext:
         fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        supplementalGroups: [1000]
         seccompProfile:
           type: RuntimeDefault
       affinity:

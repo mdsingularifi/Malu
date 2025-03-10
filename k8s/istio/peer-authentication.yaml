@@ -3,9 +3,34 @@ kind: PeerAuthentication
 metadata:
   name: secret-storage-service-mtls
   namespace: malu
+  annotations:
+    description: "Enforces strict mTLS for secret-storage-service with secure cipher suites"
+    security-level: "high"
+    last-reviewed: "2025-03-08"
 spec:
   selector:
     matchLabels:
       app: secret-storage-service
   mtls:
     mode: STRICT
+  portLevelMtls:
+    3000:
+      mode: STRICT  # Explicitly set HTTP port to use mTLS
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: secret-storage-service-tls-config
+  namespace: malu
+spec:
+  host: secret-storage-service.malu.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+      # Enforce modern TLS 1.3 with secure ciphers
+      cipherSuites:
+        - ECDHE-ECDSA-AES256-GCM-SHA384
+        - ECDHE-RSA-AES256-GCM-SHA384
+        - ECDHE-ECDSA-CHACHA20-POLY1305
+        - ECDHE-RSA-CHACHA20-POLY1305
+      minProtocolVersion: TLSV1_3

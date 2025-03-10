@@ -4,9 +4,20 @@ use std::time::Duration;
 
 use crate::core::error::{Result, ServiceError};
 
+/// Feature flags for the Secret Storage Service
+#[derive(Debug, Clone)]
+pub struct Features {
+    /// Whether secret rotation is enabled
+    pub secret_rotation: bool,
+    /// Whether dynamic secrets functionality is enabled
+    pub dynamic_secrets: bool,
+}
+
 /// Configuration for the Secret Storage Service
 #[derive(Debug, Clone)]
 pub struct AppConfig {
+    /// Feature flags
+    pub features: Features,
     /// The port to listen on
     pub port: u16,
     
@@ -182,7 +193,26 @@ impl AppConfig {
         let kafka_sasl_username = env::var("KAFKA_SASL_USERNAME").ok();
         let kafka_sasl_password = env::var("KAFKA_SASL_PASSWORD").ok();
         
+        // Feature flags
+        let secret_rotation = env::var("ENABLE_SECRET_ROTATION")
+            .unwrap_or_else(|_| "true".to_string())
+            .parse::<bool>()
+            .map_err(|_| ServiceError::ConfigurationError(
+                "Invalid ENABLE_SECRET_ROTATION value".to_string()
+            ))?;
+            
+        let dynamic_secrets = env::var("ENABLE_DYNAMIC_SECRETS")
+            .unwrap_or_else(|_| "true".to_string())
+            .parse::<bool>()
+            .map_err(|_| ServiceError::ConfigurationError(
+                "Invalid ENABLE_DYNAMIC_SECRETS value".to_string()
+            ))?;
+        
         Ok(Self {
+            features: Features {
+                secret_rotation,
+                dynamic_secrets,
+            },
             port,
             host,
             data_dir,
@@ -232,6 +262,11 @@ impl AppConfig {
         } else { 
             "File-based" 
         });
+        
+        // Print feature flags
+        tracing::info!("Feature flags:");
+        tracing::info!("  Secret rotation: {}", if self.features.secret_rotation { "enabled" } else { "disabled" });
+        tracing::info!("  Dynamic secrets: {}", if self.features.dynamic_secrets { "enabled" } else { "disabled" });
         
         if let Some(ref db_url) = self.database_url {
             let masked_url = mask_connection_string(db_url);

@@ -2,6 +2,40 @@
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
+use axum::http::StatusCode;
+use crate::core::error::ServiceError;
+
+/// Rotation configuration for secrets
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct RotationConfig {
+    /// The type of rotation schedule (interval, daily, weekly, cron)
+    #[serde(default)]
+    pub schedule_type: Option<String>,
+    
+    /// Interval in seconds for interval-based schedules
+    #[serde(default)]
+    pub interval_seconds: Option<u64>,
+    
+    /// Cron expression for cron-based schedules
+    #[serde(default)]
+    pub cron_expression: Option<String>,
+    
+    /// Day of week (0-6, Sunday is 0) for specific day schedules
+    #[serde(default)]
+    pub day_of_week: Option<u8>,
+    
+    /// Hour of day (0-23) for specific day schedules
+    #[serde(default)]
+    pub hour_of_day: Option<u8>,
+    
+    /// Minute (0-59) for specific day schedules
+    #[serde(default)]
+    pub minute: Option<u8>,
+    
+    /// Number of versions to keep (default: 5)
+    #[serde(default)]
+    pub versions_to_keep: Option<usize>,
+}
 
 /// Request for creating or updating a secret
 #[derive(Debug, Serialize, Deserialize)]
@@ -19,6 +53,14 @@ pub struct CreateSecretRequest {
     /// Optional metadata for the secret
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
+
+    /// Whether to automatically set up rotation for this secret
+    #[serde(default)]
+    pub auto_rotate: Option<bool>,
+
+    /// Rotation schedule parameters when auto_rotate is true
+    #[serde(default)]
+    pub rotation_config: Option<RotationConfig>,
 }
 
 /// Response for create/update secret operations
@@ -128,4 +170,30 @@ pub struct ErrorResponse {
     
     /// Timestamp of when the error occurred
     pub timestamp: DateTime<Utc>,
+    
+    /// Status code for HTTP response
+    #[serde(skip)]
+    pub status_code: StatusCode,
+}
+
+impl From<ServiceError> for ErrorResponse {
+    fn from(err: ServiceError) -> Self {
+        let (code, status_code) = match &err {
+            ServiceError::AuthError(_) => ("AUTH_ERROR", StatusCode::UNAUTHORIZED),
+            ServiceError::AuthorizationError(_) => ("AUTHORIZATION_ERROR", StatusCode::FORBIDDEN),
+            ServiceError::NotFound(_) => ("NOT_FOUND", StatusCode::NOT_FOUND),
+            ServiceError::InvalidInput(_) => ("INVALID_INPUT", StatusCode::BAD_REQUEST),
+            ServiceError::NotImplemented(_) => ("NOT_IMPLEMENTED", StatusCode::NOT_IMPLEMENTED),
+            ServiceError::AlreadyExists(_) => ("ALREADY_EXISTS", StatusCode::CONFLICT),
+            _ => ("INTERNAL_ERROR", StatusCode::INTERNAL_SERVER_ERROR),
+        };
+        
+        ErrorResponse {
+            message: err.to_string(),
+            code: code.to_string(),
+            error_id: Uuid::new_v4(),
+            timestamp: Utc::now(),
+            status_code,
+        }
+    }
 }

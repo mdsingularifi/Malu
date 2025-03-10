@@ -96,7 +96,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(err.into());
         }
     };
-    let service_state = Arc::new(secret_service);
+    
+    // Create AppState and get config reference
+    let app_state = service::AppState::new(secret_service.clone());
+    let service_clone = app_state.secret_service.clone();
+    let app_config = service_clone.get_config();
+    let service_state = Arc::new(app_state);
     
     // Get version information
     let version = option_env!("CARGO_PKG_VERSION").unwrap_or("unknown");
@@ -130,6 +135,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/secrets/:path", get(api::secrets::get_secret))
         .route("/api/v1/secrets/:path", delete(api::secrets::delete_secret))
         .route("/api/v1/secrets", get(api::secrets::list_secrets))
+        // Secret rotation endpoints - use the predefined rotation routes
+        .merge(api::rotation::rotation_routes())
+        // Dynamic secrets endpoints - conditionally add based on feature flag
+        .merge(if app_config.features.dynamic_secrets {
+            // Only merge the dynamic routes if the feature is enabled
+            tracing::info!("Registering dynamic secrets API endpoints");
+            api::dynamic::dynamic_routes()
+        } else {
+            tracing::info!("Dynamic secrets feature is disabled. Skipping dynamic secrets API endpoints.");
+            Router::new() // Empty router if feature is disabled
+        })
         .with_state(Arc::clone(&service_state))
         .layer(Extension(Arc::clone(&service_state)))
         .layer(Extension(build_info))

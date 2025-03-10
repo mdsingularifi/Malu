@@ -49,8 +49,17 @@ pub enum ServiceError {
     #[error("Validation error: {0}")]
     ValidationError(String),
     
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+    
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+    
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
+    
+    #[error("Already exists: {0}")]
+    AlreadyExists(String),
 }
 
 impl<T> From<PoisonError<T>> for ServiceError {

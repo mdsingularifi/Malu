@@ -102,7 +102,15 @@ impl KafkaConsumer {
                     // Record failed consumer creation in metrics
                     metrics::record_kafka_event(topic, "consumer_connection_failed");
                     metrics::record_operation_result("kafka_consumer_connection", false);
-                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    
+                    // Get reconnection delay from environment variable or use default
+                    let reconnect_delay_secs = std::env::var("KAFKA_CONSUMER_RECONNECT_DELAY_SECS")
+                        .ok()
+                        .and_then(|v| v.parse::<u64>().ok())
+                        .unwrap_or(5);
+                        
+                    tracing::info!("Waiting {}s before attempting to reconnect to Kafka...", reconnect_delay_secs);
+                    tokio::time::sleep(Duration::from_secs(reconnect_delay_secs)).await;
                     continue;
                 }
             };
@@ -180,8 +188,13 @@ impl KafkaConsumer {
             
             // If we reach here, the stream has ended or there was an error
             // Wait before attempting to reconnect
-            tracing::info!("Waiting before attempting to reconnect to Kafka...");
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            let stream_reconnect_delay_secs = std::env::var("KAFKA_STREAM_RECONNECT_DELAY_SECS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(1);
+                
+            tracing::info!("Waiting {}s before attempting to reconnect to Kafka...", stream_reconnect_delay_secs);
+            tokio::time::sleep(Duration::from_secs(stream_reconnect_delay_secs)).await;
         }
         
         // This code is unreachable because of the infinite loop above,
@@ -192,15 +205,46 @@ impl KafkaConsumer {
     
     /// Create a Kafka consumer for a topic
     fn create_consumer(config: &AppConfig, topic: &str) -> Result<StreamConsumer> {
+        use std::env;
+        
+        // Get consumer configuration from environment variables
+        let auto_commit = env::var("KAFKA_AUTO_COMMIT")
+            .unwrap_or_else(|_| "false".to_string());
+            
+        let auto_offset_reset = env::var("KAFKA_AUTO_OFFSET_RESET")
+            .unwrap_or_else(|_| "earliest".to_string());
+            
+        let session_timeout_ms = env::var("KAFKA_SESSION_TIMEOUT_MS")
+            .unwrap_or_else(|_| "6000".to_string());
+            
+        let max_poll_interval_ms = env::var("KAFKA_MAX_POLL_INTERVAL_MS")
+            .unwrap_or_else(|_| "300000".to_string());
+            
+        let fetch_max_bytes = env::var("KAFKA_FETCH_MAX_BYTES")
+            .unwrap_or_else(|_| "52428800".to_string()); // 50MB default
+            
+        let fetch_min_bytes = env::var("KAFKA_FETCH_MIN_BYTES")
+            .unwrap_or_else(|_| "1".to_string());
+            
+        let fetch_max_wait_ms = env::var("KAFKA_FETCH_MAX_WAIT_MS")
+            .unwrap_or_else(|_| "500".to_string());
+        
+        tracing::info!("Creating Kafka consumer with session timeout: {}ms, auto commit: {}, offset reset: {}", 
+                      session_timeout_ms, auto_commit, auto_offset_reset);
+        
         let mut client_config = ClientConfig::new();
         
         client_config
             .set("bootstrap.servers", &config.kafka_bootstrap_servers)
             .set("group.id", &config.kafka_consumer_group_id)
             .set("client.id", &format!("{}-consumer", config.kafka_client_id))
-            .set("enable.auto.commit", "false")
-            .set("auto.offset.reset", "earliest")
-            .set("session.timeout.ms", "6000");
+            .set("enable.auto.commit", &auto_commit)
+            .set("auto.offset.reset", &auto_offset_reset)
+            .set("session.timeout.ms", &session_timeout_ms)
+            .set("max.poll.interval.ms", &max_poll_interval_ms)
+            .set("fetch.max.bytes", &fetch_max_bytes)
+            .set("fetch.min.bytes", &fetch_min_bytes)
+            .set("fetch.wait.max.ms", &fetch_max_wait_ms);
             
         // Configure security if provided
         if let Some(protocol) = &config.kafka_security_protocol {

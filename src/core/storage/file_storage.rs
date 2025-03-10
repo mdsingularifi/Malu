@@ -123,13 +123,32 @@ impl StorageProvider for FileStorageProvider {
 
 // Factory function to create a new file storage provider
 pub async fn create_file_storage_provider(base_path: &str) -> Result<Arc<FileStorageProvider>> {
-    let path = Path::new(base_path);
+    use std::env;
     
-    // Create the base directory if it doesn't exist
-    if !path.exists() {
+    // Check for environment variables that might override the base path
+    let final_path = env::var("FILE_STORAGE_PATH")
+        .unwrap_or_else(|_| base_path.to_string());
+    
+    let path = Path::new(&final_path);
+    
+    // Get file permission settings from environment
+    let create_mode = env::var("FILE_STORAGE_CREATE_MODE")
+        .unwrap_or_else(|_| "true".to_string())
+        .parse::<bool>()
+        .unwrap_or(true);
+    
+    tracing::info!("Creating file storage provider at path: {}", path.display());
+    
+    // Create the base directory if it doesn't exist and if create_mode is true
+    if !path.exists() && create_mode {
+        tracing::info!("Creating storage directory: {}", path.display());
         fs::create_dir_all(path).await.map_err(|e| {
             ServiceError::StorageError(format!("Failed to create storage directory: {}", e))
         })?;
+    } else if !path.exists() {
+        return Err(ServiceError::StorageError(
+            format!("Storage directory {} does not exist and create_mode is disabled", path.display())
+        ));
     }
     
     Ok(Arc::new(FileStorageProvider::new(path)))

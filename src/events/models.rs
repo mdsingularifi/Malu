@@ -28,6 +28,12 @@ pub enum SecretAction {
     
     /// A list of secrets was retrieved
     List,
+    
+    /// A secret was rotated
+    Rotate,
+    
+    /// A dynamic secret was generated
+    Generated,
 }
 
 /// Event related to a secret operation

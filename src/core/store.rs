@@ -2,12 +2,15 @@ use crate::core::{
     StorageProviderInstance,
     CryptoProviderInstance,
     AuthProviderInstance,
-    error::{Result, ServiceError}
+    MaluDynamicSecretProviderInstance,
+    error::{Result, ServiceError},
+    malustore_dynamic::DynamicSecretRegistry
 };
 use std::sync::Arc;
 use std::path::Path;
 use tokio::fs;
 use zeroize::Zeroize;
+use std::fmt;
 
 /// A secure container for sensitive data that is automatically zeroed when dropped
 pub struct SecretBytes {
@@ -41,6 +44,7 @@ impl Drop for SecretBytes {
 }
 
 /// Configuration for MaluStore
+#[derive(Debug)]
 pub struct MaluConfig {
     #[allow(dead_code)]
     pub storage_path: String,
@@ -75,6 +79,20 @@ pub struct MaluStore {
     storage_provider: StorageProviderInstance,
     crypto_provider: CryptoProviderInstance,
     auth_provider: AuthProviderInstance,
+    dynamic_registry: Option<DynamicSecretRegistry>,
+}
+
+// Custom Debug implementation for MaluStore to avoid Debug requirements for its fields
+impl fmt::Debug for MaluStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MaluStore")
+            .field("config", &self.config)
+            .field("storage_provider", &"<StorageProviderInstance>")
+            .field("crypto_provider", &"<CryptoProviderInstance>")
+            .field("auth_provider", &"<AuthProviderInstance>")
+            .field("dynamic_registry", &self.dynamic_registry.is_some())
+            .finish()
+    }
 }
 
 impl MaluStore {
@@ -90,6 +108,7 @@ impl MaluStore {
             storage_provider,
             crypto_provider,
             auth_provider,
+            dynamic_registry: None,
         }
     }
     
@@ -191,6 +210,67 @@ impl MaluStore {
     #[allow(dead_code)]
     pub async fn verify_token(&self, token: &str) -> Result<bool> {
         self.auth_provider.verify_token(token).await
+    }
+    
+    /// Initialize dynamic secrets functionality
+    pub async fn init_dynamic_secrets(&mut self) -> Result<()> {
+        // Create the dynamic registry
+        let registry = DynamicSecretRegistry::new(
+            self.storage_provider.clone(),
+            self.crypto_provider.clone(),
+        );
+        
+        // Load existing leases
+        registry.load_leases().await?;
+        
+        // Start the cleanup task
+        registry.start_cleanup_task(3600).await?; // Run cleanup every hour
+        
+        self.dynamic_registry = Some(registry);
+        Ok(())
+    }
+    
+    /// Get the dynamic secret registry
+    pub fn dynamic_registry(&self) -> Result<&DynamicSecretRegistry> {
+        self.dynamic_registry.as_ref().ok_or_else(|| {
+            ServiceError::InternalError("Dynamic secret registry not initialized".to_string())
+        })
+    }
+    
+    /// Register a dynamic secret provider
+    pub async fn register_dynamic_provider(&self, provider: MaluDynamicSecretProviderInstance) -> Result<()> {
+        let registry = self.dynamic_registry()?;
+        registry.register_provider(provider).await
+    }
+    
+    /// Generate a dynamic secret
+    pub async fn generate_dynamic_secret(
+        &self,
+        provider_type: &str,
+        path: &str,
+        params: &serde_json::Value,
+        ttl: Option<u64>,
+    ) -> Result<crate::core::MaluDynamicSecret> {
+        let registry = self.dynamic_registry()?;
+        registry.generate_secret(provider_type, path, params, ttl).await
+    }
+    
+    /// Revoke a dynamic secret
+    pub async fn revoke_dynamic_secret(&self, lease_id: &str) -> Result<()> {
+        let registry = self.dynamic_registry()?;
+        registry.revoke_secret(lease_id).await
+    }
+    
+    /// Renew a dynamic secret
+    pub async fn renew_dynamic_secret(&self, lease_id: &str, ttl: Option<u64>) -> Result<crate::core::MaluDynamicSecret> {
+        let registry = self.dynamic_registry()?;
+        registry.renew_secret(lease_id, ttl).await
+    }
+    
+    /// List dynamic secret leases
+    pub async fn list_dynamic_leases(&self, path_prefix: Option<&str>) -> Result<Vec<crate::core::malustore_dynamic::SecretLease>> {
+        let registry = self.dynamic_registry()?;
+        registry.list_leases(path_prefix).await
     }
 }
 
